@@ -6,9 +6,9 @@
 ## About
 * This capstone served as a final cumulation of the Data Science Individual Major at Wellesley College to be presented at a conference prior to graduation.
 * This project is an extension of research done at MIT Sloan School of Management under Dr. Joanna Moody. 
+* Unfortunately, the data used for this research project cannot be distributed due to privacy constraints.
 
 ## Repository Contents 
 
 * R file with project code 
-* Sample dataset (actual dataset cannot be distributed)
 * Conference presentation poster 
