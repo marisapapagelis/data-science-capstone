@@ -1,0 +1,392 @@
+---
+title: "Data Science Capstone"
+author: "Marisa Papagelis"
+date: "03/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up
+## Initialize packages
+```{r packages, warning = FALSE, message=FALSE}
+library(ggplot2)
+library(viridis)
+library(grid)
+library(gridExtra)
+library(dplyr)
+library(car) 
+library(lme4)
+library(rsq) 
+library(lmtest)
+library(betareg)
+library(reshape2) 
+library(stringr)
+library(pglm)
+library(MASS)
+```
+
+## Load data
+```{r data, warning = FALSE}
+#Read-in Qualtrics survey responses
+data_raw <- read.csv("./MaaS_survey/Car+Ownership+Valuation+Survey+-+Revised_July+3%2C+2020_10.45.csv", stringsAsFactors=FALSE,na.strings=c("","NA"))
+data_gc <- filter(data_raw, gc==1)
+
+#Remove additional "header" rows from Qualtrics data export
+data_gc <- data_gc[3:nrow(data_gc),] 
+data_gc$ResponseId_orig <- data_gc$ResponseId
+data_gc$ResponseId <- as.factor(1:nrow(data_gc))
+rownames(data_gc) <- 1:nrow(data_gc)
+```
+
+# Sample Sociodemographics
+```{r sociodem, warning=FALSE}
+#Recode HHInc categories to quasi-continuous, numeric variable representing HH income in $1000
+summary(as.factor(data_gc$HHInc))
+data_gc$HHInc.num <- recode(data_gc$HHInc,
+      "'Less than $10,000'=5; '$10,000 - $14,999'=12.5; '$15,000 - $24,999'=20;
+       '$25,000 - $34,999'=30; '$35,000 - $49,999'=42.5; '$50,000 - $74,999'=62.5;
+       '$75,000 - $99,999'=87.5; '$100,000 - $149,999'=125; '$150,000 - $199,999'=175;
+       '$200,000 or more'=225")
+
+data_gc <- data_gc %>% mutate(#very likely below poverty line: 'Less than $10,000'=5; '$10,000 - $14,999'=12.5; '$15,000 - $24,999'=20
+                              HHInc_bin1 = ifelse(HHInc.num == 5 | HHInc.num == 12.5 | HHInc.num == 20, 1, 0), 
+                              # '$25,000 - $34,999'=30; $35,000 - $49,999'=42.5;
+                              HHInc_bin2 = ifelse(HHInc.num == 30 | HHInc.num == 42.5, 1, 0),
+                              # '$50,000 - $74,999'=62.5; '$75,000 - $99,999'=87.5; 
+                              HHInc_bin3 = ifelse(HHInc.num == 62.5 | HHInc.num == 87.5, 1, 0),
+                              # '$100,000 - $149,999'=125; '$150,000 - $199,999'=175;
+                              HHInc_bin4 = ifelse(HHInc.num == 125 | HHInc.num == 175, 1, 0),
+                              #  '$200,000 or more'=225"
+                              HHInc_bin5 = ifelse(HHInc.num == 225, 1, 0)
+                              )
+
+#How many cars does your household own?: {"Zero", "1 car", "2 cars", "3 or more cars"}
+data_gc$HHCars <- recode(data_gc$HHCars, "'Zero'=0; '1 car'=1; '2 cars'=2; '3 or more cars'=3")
+
+#How many people are there in your household?
+data_gc$HHPers <- recode(data_gc$HHPers, "'1'=1; '2'=2; '3'=3; '4'=4; '5'=5; '6'=6; '7 or more'=7")
+
+#how many working adults are there in your household?
+data_gc$HHWkAdult <- recode(data_gc$HHWkAdult, "'0'=0; '1'=1; '2'=2; '3'=3; '4'=4")
+
+#recode RHUse_Typical
+data_gc$RHUse_Typical <- recode(data_gc$RHUse_Typical, "'Zero times' = 0; '1-3 times' = 2; '4-10 times' = 7; 'More than 10 times' = 10")
+
+data_gc <- data_gc %>% mutate(ModeTravel_Typical_1 = as.numeric(ModeTravel_Typical_1),
+                              ModeTravel_Typical_2 = as.numeric(ModeTravel_Typical_2),
+                              ModeTravel_Typical_3 = as.numeric(ModeTravel_Typical_3),
+                              ModeTravel_Typical_4 = as.numeric(ModeTravel_Typical_4),
+                              ModeTravel_Typical_5 = as.numeric(ModeTravel_Typical_5),
+                              ModeTravel_Typical_6 = as.numeric(ModeTravel_Typical_6),
+                              ModeTravel_Typical_7 = as.numeric(ModeTravel_Typical_7),
+                              ModeTravel_Typical_8 = as.numeric(ModeTravel_Typical_8),
+                              ModeTravel_Typical_9 = as.numeric(ModeTravel_Typical_9),
+                              ModeTravel_Typical_10 = as.numeric(ModeTravel_Typical_10),
+                              ModeTravel_Typical_11 = as.numeric(ModeTravel_Typical_11),
+                              ModeTravel_Typical_12 = as.numeric(ModeTravel_Typical_12),
+                              ModeTravel_Typical_car = ModeTravel_Typical_1 + ModeTravel_Typical_2,
+                              ModeTravel_Typical_PT = ModeTravel_Typical_3 + ModeTravel_Typical_4,
+                              ModeTravel_Typical_RH = ModeTravel_Typical_6 + ModeTravel_Typical_7,
+                              ModeTravel_Typical_Other = ModeTravel_Typical_5 + ModeTravel_Typical_8 + ModeTravel_Typical_9 + ModeTravel_Typical_10 + ModeTravel_Typical_11 + ModeTravel_Typical_12,
+                              ModeTravel_Typical_Total = ModeTravel_Typical_car + ModeTravel_Typical_PT + ModeTravel_Typical_RH + ModeTravel_Typical_Other)
+                              
+
+#recode Travel during COVID
+data_gc <- data_gc %>% mutate(ModeTravel_CV_1 = as.numeric(Q283_1), #personal car as driver
+                              ModeTravel_CV_2 = as.numeric(Q283_2), #personal car as passenger
+                              ModeTravel_CV_3 = as.numeric(Q283_3), #bus
+                              ModeTravel_CV_4 = as.numeric(Q283_4), #train
+                              ModeTravel_CV_5 = as.numeric(Q283_5),
+                              ModeTravel_CV_6 = as.numeric(Q283_6), #ride-hailing - private ride (e.g. UberX, Lyft, Taxi)
+                              ModeTravel_CV_7 = as.numeric(Q283_7), #ride-hailing - pooled ride (e.g. UberPool Lyft)
+                              ModeTravel_CV_8 = as.numeric(Q283_8),
+                              ModeTravel_CV_9 = as.numeric(Q283_9),
+                              ModeTravel_CV_10 = as.numeric(Q283_10),
+                              ModeTravel_CV_11 = as.numeric(Q283_11),
+                              ModeTravel_CV_12 = as.numeric(Q283_12),
+                              ModeTravel_CV_car = ModeTravel_CV_1 + ModeTravel_CV_2,
+                              ModeTravel_CV_PT = ModeTravel_CV_3 + ModeTravel_CV_4,
+                              ModeTravel_CV_RH = ModeTravel_CV_6 + ModeTravel_CV_7, 
+                              ModeTravel_CV_Other = ModeTravel_CV_5 + ModeTravel_CV_8 + ModeTravel_CV_9 + ModeTravel_CV_10 + ModeTravel_CV_11 + ModeTravel_CV_12,  
+                              ModeTravel_CV_Total = ModeTravel_CV_car + ModeTravel_CV_PT + ModeTravel_CV_RH + ModeTravel_CV_Other)
+
+#clean Unable variable to create binary indicators - multiple check boxes response
+Unable_options <- c("Driving a car", "Public transit, including bus or train","Bicycle or scooter",
+                    "Ride-hailing")
+Unable_vars <- c("Car", "PT", "Bicycle", "RH")
+# create indicator columns for each action
+for (i in 1:length(Unable_options)) {
+  data_gc[paste("Unable", Unable_vars[i], sep = "")] <- as.integer(str_detect(data_gc$Unable, Unable_options[i]))
+}
+# replace NAs with zero
+data_gc <- data_gc %>% mutate(UnableCar = ifelse(is.na(UnableCar)==TRUE, 0, UnableCar),
+                              UnablePT = ifelse(is.na(UnablePT)==TRUE, 0, UnablePT),
+                              UnableBicycle = ifelse(is.na(UnableBicycle)==TRUE, 0, UnableBicycle),
+                              UnableRH = ifelse(is.na(UnableRH)==TRUE, 0, UnableRH))
+#checked pairwise correlations among the Unable variables;
+#  low potential for multicollinearity given highest correlation is 0.67
+#650 people unable to use car, 328 unable to use PT, 500 unable to use bike/scooter, and 345 unable to use ridehailing
+
+#clean EmpBen (Employee Benefits) variable to create binary indicators - multiple check boxes response
+EmpBen_options <- c("Subsidized or free parking", "Discounted or free transit pass",
+                    "Shower, indoor bike parking, or other bike commuting amenities",
+                    "Carpooling or other program to encourage taking non-single-occupancy vehicles to work")
+EmpBen_vars <- c("Parking", "Transit", "Bike", "Carpool")
+# create indicator columns for each action
+for (i in 1:length(EmpBen_options)) {
+  data_gc[paste("EmpBen", EmpBen_vars[i], sep = "")] <- as.integer(str_detect(data_gc$EmpBen, EmpBen_options[i]))
+}
+# replace NAs with zero
+data_gc <- data_gc %>% mutate(EmpBenParking = ifelse(is.na(EmpBenParking)==TRUE, 0, EmpBenParking),
+                              EmpBenTransit = ifelse(is.na(EmpBenTransit)==TRUE, 0, EmpBenTransit),
+                              EmpBenBike = ifelse(is.na(EmpBenBike)==TRUE, 0, EmpBenBike),
+                              EmpBenCarpool = ifelse(is.na(EmpBenCarpool)==TRUE, 0, EmpBenCarpool))
+#checked pairwise correlations among the EmpBen variables;
+#  low potential for multicollinearity given highest correlation is 0.25
+#273 individuals with bike benefits, 499 with transit benefits, 1162 with parking benefits, and 293 with carpool benefits
+
+
+summary(as.factor(data_gc$Employ))
+data_gc <- data_gc %>% mutate(Unemploy = ifelse(Employ == "Unemployed, looking for work" | Employ == "Unemployed, unable to work or not looking for work" | Employ =="Furloughed, without pay", 1, 0),
+                              Student = ifelse(Employ == "Student", 1, 0),
+                              Retired = ifelse(Employ == "Retired", 1, 0),
+                              FullTime = ifelse(Employ == "Employed, full-time", 1, 0),
+                              PartTime = ifelse(Employ == "Employed, part-time", 1, 0),
+                              OtherEmp = ifelse(grepl("family worker", Employ) | Employ == "Military" | Employ == "Furloughed, with pay", 1, 0))
+
+
+
+# Create Binary Indicators
+data_gc <- data_gc %>% mutate(Chicago = ifelse(DMA == "Chicago", 1, 0),
+                              Seattle = ifelse(DMA == "Seattle", 1, 0),
+                              Dallas = ifelse(DMA == "Dallas", 1, 0),
+                              WashingtonDC = ifelse(DMA == "WashingtonDC", 1, 0),
+                              Age = as.numeric(Age),
+                              Male = ifelse(Gender == "Male", 1, 0),
+                              NoCar = ifelse(HHCars == 0, 1, 0),
+                              CarOwner = ifelse(HHCars > 0, 1, 0),
+                              OneCar = ifelse(HHCars == 1, 1, 0),
+                              TwoCar = ifelse(HHCars == 2, 1, 0),
+                              ThreeCar = ifelse(HHCars == 3, 1, 0),
+                              MultiCar = ifelse(HHCars>1, 1, 0),
+                              UsedRH = ifelse(RH_UseInd == "Yes", 1, 0),
+                              White = ifelse(grepl("White or Caucasian", Race), 1, 0),
+                              Black = ifelse(grepl("Black or African American", Race), 1, 0),
+                              Asian = ifelse(grepl("Asian", Race), 1, 0),
+                              Native = ifelse(grepl("American Indian or Alaska Native", Race) | grepl("Native Hawaiian or other Pacific Islander", Race), 1, 0),
+                              OtherRace = ifelse(grepl("Other", Race), 1, 0),
+                              Hispanic = ifelse(Hispanic == "Yes", 1, 0),
+                              HSorless = ifelse(Educ == "High school diploma or equivalent (GED)" | Educ == "Less than high school diploma", 1, 0),
+                              LessCol = ifelse(Educ == "2+ year college/Associates Degree" | Educ == "Some college, no degree", 1, 0),
+                              ColDeg = ifelse(Educ == "4+ year college/Bachelors Degree", 1, 0),
+                              MstDeg = ifelse(Educ == "Masters Degree", 1, 0),
+                              ProDeg = ifelse(Educ == "Doctoral or Professional degree (PhD, M.D., J.D., etc.)", 1, 0),
+                              AdvDeg = MstDeg + ProDeg,
+                              License = ifelse(License == "Yes", 1, 0),
+                              PTnonuser = ifelse(ModeTravel_Typical_PT == 0, 1, 0),
+                              PTinfrequent = ifelse(ModeTravel_Typical_PT > 0 & ModeTravel_Typical_PT <= 5, 1, 0),
+                              PTfrequent = ifelse(ModeTravel_Typical_PT > 5 & ModeTravel_Typical_PT <= 10, 1, 0),
+                              PTsuperuser = ifelse(ModeTravel_Typical_PT > 10, 1, 0),
+                              PCnonuser = ifelse(ModeTravel_Typical_car == 0, 1, 0),
+                              PCinfrequent = ifelse(ModeTravel_Typical_car > 0 & ModeTravel_Typical_car <= 5, 1, 0),
+                              PCfrequent = ifelse(ModeTravel_Typical_car > 5 & ModeTravel_Typical_car <= 15, 1, 10),
+                              PCsuperuser = ifelse(ModeTravel_Typical_car > 15, 1, 0),
+                              RHUse_Typical = as.numeric(RHUse_Typical),
+                              RHUse_Typical_bin1 = ifelse(RHUse_Typical == 0, 1, 0),
+                              RHUse_Typical_bin2 = ifelse(RHUse_Typical %in% 1:3, 1, 0),
+                              RHUse_Typical_bin3 = ifelse(RHUse_Typical %in% 4:10, 1, 0),
+                              RHUse_Typical_bin4 = ifelse(RHUse_Typical >= 10, 1, 0),
+                              HHChild = as.numeric(HHChild),
+                              HaveKids = ifelse(HHChild > 0, 1, 0),
+                              HHWkAdult = as.numeric(HHWkAdult),
+                              EssWkr = ifelse(EssentialWorker=="Yes", 1, 0), 
+                              PrevWorkSchool = ifelse(grepl("Did not go to work or school", CV_PrevActions), 1, 0), 
+                              PrevBusSubway = ifelse(grepl("Avoided travel on subways or buses", CV_PrevActions), 1, 0),
+                              PrevRH = ifelse(grepl("Avoided travel by taxis or ridehailing", CV_PrevActions), 1, 0)
+                              
+              )
+
+#Work from home capability: Yes, No, or 1655 "NA" that are systematically missing based on answer to "FixedPlace"; did not ask this question for the 491 respondents who say they already worked from home pre-pandemic or the 1164 individuals who were not working/attending school pre-pandemic (retired, unemployed, etc.).
+
+data_gc <- data_gc %>% mutate(WFH_option = ifelse(FixedPlace=="Yes: school and/or work at home", "Yes", WFH_option), 
+                                  #replace NAs with "Yes" systematically for those who already work at home
+                              WFH = ifelse(WFH_option == "Yes", 1, 0),
+                              WFH_nomiss = ifelse(is.na(WFH), 0, WFH))
+
+#Work from home models should exclude those that are unemployed/not working -- so filter by data_gc$FixedPlace != "No: was not employed or going to school", but for the purposes of the preventative action models, we could code WFH as 0 for these individuals so they are not excluded from the analysis
+
+sociodem_vars <- c("ResponseId", "DMA", "WashingtonDC", "Chicago", "Seattle", "Dallas", "Age", "Male", "HHCars", "NoCar", "CarOwner", "OneCar", "TwoCar", "ThreeCar", "MultiCar",  "HHInc.num", "HHInc_bin1", "HHInc_bin2", "HHInc_bin3", "HHInc_bin4", "HHInc_bin5", "White", "Black", "Native", "Asian", "OtherRace", "Hispanic", "HSorless", "LessCol", "ColDeg", "MstDeg", "ProDeg", "AdvDeg", "Unemploy", "Student", "Retired", "FullTime", "PartTime", "OtherEmp", "License", "HHPers", "PTnonuser", "PTinfrequent", "PTfrequent", "PTsuperuser", "PCnonuser", "PCinfrequent", "PCfrequent", "PCsuperuser", "Urban...Suburban...Rural", "Rural", "Urban", "Suburban", "ModeTravel_Typical_PT", "ModeTravel_Typical_car", "ModeTravel_Typical_RH", "ModeTravel_CV_car", "ModeTravel_CV_PT", "ModeTravel_CV_RH", "Car_Livelihood", "RHUse_Typical_bin1", "RHUse_Typical_bin2", "RHUse_Typical_bin3", "RHUse_Typical_bin4",  "HHChild", "HaveKids", "HHWkAdult", "UnableBicycle", "UnableCar", "UnablePT", "UnableRH", "EmpBenParking", "EmpBenTransit", "EmpBenBike", "EmpBenCarpool", "UsedRH", "RHUse_Typical", "PrevWorkSchool", "PrevBusSubway", "PrevRH", "WFH")
+
+```
+# Data Exploration
+```{r additional variables, warning = FALSE}
+# Use of other modes pre- and during COVID – “In the past week, how many trips did you make using each of the following transportation modes?
+
+# sum of trips from all transportation PRE covid
+data_gc$ModeTravel_Typical_Total
+hist(data_gc$ModeTravel_Typical_Total, breaks = c(0,5,10, 15,20,25, 30,35, 40,45, 50, 60, 70, 80, 90,100,200,250,502))
+summary(data_gc$ModeTravel_Typical_Total)
+# boxplot(ModeTravel_Typical_Total)
+
+# sum of trips from all transportation DURING covid
+data_gc$ModeTravel_CV_Total
+data_gc <- data_gc %>% mutate(ModeTravel_CV_Total = ifelse(ModeTravel_CV_Total>500,500,ModeTravel_CV_Total))
+hist(data_gc$ModeTravel_CV_Total,  breaks = c(0,5,10, 15,20,25, 30,35, 40,45, 50, 60, 70, 80, 90,100,200,250,502))
+summary(data_gc$ModeTravel_CV_Total)
+
+# multi histogram of sum of trips before and during covid
+require(plotrix)
+l <- list(data_gc$ModeTravel_Typical_Total,data_gc$ModeTravel_CV_Total)
+multhist(l, breaks = c(0,5,10,15,20,25, 30,35, 40, 45, 50, 60, 70, 80, 90,100,200,250,502), main="Total Weekly Trips Before and During Covid-19", xlab="Number of Trips", ylab="Frequency", col=c("pink", "blue"))
+legend("topright", c("Before Covid-19", "During Covid-19"), fill=c("pink", "blue"))
+
+# change in trips for each individual (pre covid - during covid)
+data_gc$ModeTravel_Difference = data_gc$ModeTravel_Typical_Total - data_gc$ModeTravel_CV_Total
+hist(data_gc$ModeTravel_Difference)
+summary(data_gc$ModeTravel_Difference)
+
+#so if travel during covid is MORE than travel pre-covid, you will get a negative (valid for 3993 responses)
+length(which(data_gc$ModeTravel_Difference<0)) #traveled more during COVID 488
+length(which(data_gc$ModeTravel_Difference==0)) #same 884
+length(which(data_gc$ModeTravel_Difference>0)) #traveled less during COVID 2593
+
+# find mode travel difference for each individual mode
+data_gc <- data_gc %>% mutate(ModeTravel_Diff_train = ModeTravel_Typical_4 - ModeTravel_CV_4,
+                              ModeTravel_Diff_bus = ModeTravel_Typical_3 - ModeTravel_CV_3,
+                              ModeTravel_Diff_cardriver = ModeTravel_Typical_1 - ModeTravel_CV_1, 
+                              ModeTravel_Diff_carpassenger = ModeTravel_Typical_2 - ModeTravel_CV_2, 
+                              ModeTravel_Diff_rental = ModeTravel_Typical_5 - ModeTravel_CV_5, 
+                              ModeTravel_Diff_rhpriv = ModeTravel_Typical_6 - ModeTravel_CV_6, 
+                              ModeTravel_Diff_rhpool = ModeTravel_Typical_7 - ModeTravel_CV_7, 
+                              ModeTravel_Diff_sharedbike = ModeTravel_Typical_8 - ModeTravel_CV_8, 
+                              ModeTravel_Diff_personalbike= ModeTravel_Typical_9 - ModeTravel_CV_9, 
+                              ModeTravel_Diff_walk = ModeTravel_Typical_10 - ModeTravel_CV_10, 
+                              ModeTravel_Diff_motor = ModeTravel_Typical_11 - ModeTravel_CV_11,
+                              ModeTravel_Diff_other = ModeTravel_Typical_12 - ModeTravel_CV_12)
+
+# percentage across all individuals for different modes of travel DURING COVID
+sum(data_gc$ModeTravel_CV_4, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # train 0.01618292
+sum(data_gc$ModeTravel_CV_3, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # bus 0.0220252
+sum(data_gc$ModeTravel_CV_1, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # cardriver 0.5441531
+sum(data_gc$ModeTravel_CV_2, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # carpassenger 0.1557816
+sum(data_gc$ModeTravel_CV_5, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # rental 0.01564162
+sum(data_gc$ModeTravel_CV_6, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # rhpriv 0.03126458
+sum(data_gc$ModeTravel_CV_7, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # rhpool 0.0124685
+sum(data_gc$ModeTravel_CV_8, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # sharedbike 0.008175455
+sum(data_gc$ModeTravel_CV_9, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # personalbike 0.03363509
+sum(data_gc$ModeTravel_CV_10, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # walk 0.1529818
+sum(data_gc$ModeTravel_CV_11, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # motor 0.01661223
+sum(data_gc$ModeTravel_CV_12, na.rm=T)/sum(data_gc$ModeTravel_CV_Total, na.rm=T) # other 0.004423705
+
+# percentage across all individuals for different modes of travel BEFORE COVID 
+sum(data_gc$ModeTravel_Typical_4, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # train 0.03257003 (dec) -0.01638711
+sum(data_gc$ModeTravel_Typical_3, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # bus 0.04256323 (dec) -0.02053803
+sum(data_gc$ModeTravel_Typical_1, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # cardriver 0.5060615 (INC BY 4%) 0.0380916
+sum(data_gc$ModeTravel_Typical_2, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # carpassenger 0.1461104 (INC BY 1%) 0.0096712
+sum(data_gc$ModeTravel_Typical_5, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # rental 0.01261815 (~same) 0.00302347
+sum(data_gc$ModeTravel_Typical_6, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # rhpriv 0.05379408 (dec) -0.0225295
+sum(data_gc$ModeTravel_Typical_7, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # rhpool 0.01866819 (~same) -0.00619969
+sum(data_gc$ModeTravel_Typical_8, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # sharedbike 0.009302433 (~same) -0.001126978
+sum(data_gc$ModeTravel_Typical_9, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # personalbike 0.02851748 (INC BY 1%) 0.00511761
+sum(data_gc$ModeTravel_Typical_10, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # walk 0.147987 (INC BY 1%) 0.0049948
+sum(data_gc$ModeTravel_Typical_11, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # motor 0.01096029 (~same) 0.00565194
+sum(data_gc$ModeTravel_Typical_12, na.rm=T)/sum(data_gc$ModeTravel_Typical_Total, na.rm=T) # other 0.006216972 (~same) -0.001793267
+
+# stacked bar chart of PROPORTION of each travel mode 
+Coronavirus <- c(rep("Before" , 12) , rep("During" , 12))
+TravelMode <- rep(c('Train', 'Bus', 'Car Driver', 'Car Passenger', 'Rental', 'RH Priv', 'RH Pool', 'Shared Bike', 'Personal Bike', 'Walk', 'Motor', 'Other') , 2)
+Percentage <- c(0.03257003, 0.0220252, 0.5441531, 0.1557816, 0.01564162, 0.03126458, 0.01866819, 0.009302433, 0.02851748, 0.147987, 0.01096029, 0.006216972, 0.01618292, 0.04256323, 0.5060615, 0.1461104, 0.01261815, 0.05379408, 0.0124685, 0.008175455, 0.03363509, 0.1529818, 0.01661223, 0.004423705)
+data <- data.frame(Coronavirus,TravelMode,Percentage)
+ggplot(data, aes(fill=TravelMode, y=Percentage, x=Coronavirus)) + 
+    geom_bar(position="fill", stat="identity") + theme_classic() + ggtitle("Weekly Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19")
+
+# stacked bar chart of COUNT of each travel mode
+Count <- c(2829, 3697,43956,12691,1096,4672,1621,808,2477,12854, 952,  867,1180,8346,838,1675,668,438,1802,8196,890,237)
+TravelMode <- rep(c('Train', 'Bus', 'Car Driver', 'Car Passenger', 'Rental', 'RH Priv', 'RH Pool', 'Shared Bike', 'Personal Bike', 'Walk', 'Motor') , 2)
+Coronavirus <- c(rep("Before" , 11) , rep("During" , 11))
+data <- data.frame(Coronavirus,TravelMode, Count)
+ggplot(data, aes(fill=TravelMode, y=Count, x=Coronavirus)) + 
+    geom_bar(position="stack", stat="identity") + theme_classic() + ggtitle("Weekly Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19")
+
+# violin plot 
+# x - mode 
+# y - change in number of weekly trips pre vs. during covid
+df <- data.frame(mode = c('Train', 'Bus', 'Car Driver', 'Car Passenger', 'Rental', 'RH Priv', 'RH Pool', 'Shared Bike', 'Personal Bike', 'Walk', 'Motor', 'Other'), diff = c(data_gc$ModeTravel_Diff_train, data_gc$ModeTravel_Diff_bus, data_gc$ModeTravel_Diff_cardriver, data_gc$ModeTravel_Diff_carpassenger, data_gc$ModeTravel_Diff_rental, data_gc$ModeTravel_Diff_rhpriv, data_gc$ModeTravel_Diff_rhpool, data_gc$ModeTravel_Diff_sharedbike, data_gc$ModeTravel_Diff_personalbike, data_gc$ModeTravel_Diff_walk, data_gc$ModeTravel_Diff_motor, data_gc$ModeTravel_Diff_other))
+head(df)
+
+p <- ggplot(df, aes(x=mode, y=diff)) + 
+  geom_violin(trim = FALSE) + ylab("Change in Number of Weekly Trips") + xlab("Mode of Travel") + theme(axis.text.x = element_text(angle = 90)) + ggtitle("Change in Weekly Trips Before/During Covid-19")
+p + coord_flip() + theme_classic() 
+```
+# Data Modeling
+```{r linear regression, warning = FALSE}
+# data_omit <- data_gc
+# na.omit(data_omit)
+# attach(data_omit)
+# 
+# # ModeTravel_Difference in a linear regression
+# ModeTravel <- lm(ModeTravel_Difference ~ Age + Male + AdvDeg + HHPers + HHChild + HHCars + Unemploy + PartTime + Retired + Student + OtherEmp + HSorless + ColDeg + MstDeg + EssWkr + Chicago + Seattle + Dallas + Black + Native + Asian + OtherRace + Hispanic + EmpBenParking + EmpBenTransit + EmpBenBike + EmpBenCarpool + PTinfrequent + PTsuperuser + PTnonuser, data=data_omit)
+# ModeTravel
+# summary(ModeTravel)
+# 
+# vif(ModeTravel) # all under threshold of 5
+# 
+# AIC.model <- step(ModeTravel, direction="both", trace=0,  steps=1000, k=2)
+# summary(AIC.model)
+# plot(AIC.model)
+# 
+# # remove more outliers/influential observations
+# data_omit <- data_omit[-c(1854, 1355, 107, 1644, 2117),]
+# ModeTravel_Difference <- ModeTravel_Difference[-c(1854, 1355, 107, 1644, 2117)]
+# attach(data_omit)
+# 
+# fit.AIC <- lm(ModeTravel_Difference ~ Male  + HHCars + Student + ColDeg + EssWkr + Seattle + Black + EmpBenParking + PTinfrequent + PTsuperuser + PTnonuser, data = data_omit)
+# plot(fit.AIC)
+# 
+# data_omit <- data_omit[-c(2134, 2783, 3322, 1114, 455),]
+# ModeTravel_Difference <- ModeTravel_Difference[-c(2134, 2783, 3322, 1114, 455)]
+# attach(data_omit)
+# 
+# fit.AIC.final <- lm(ModeTravel_Difference ~ Male  + HHCars + Student + ColDeg + EssWkr + Seattle + Black + EmpBenParking + PTinfrequent + PTsuperuser + PTnonuser, data = data_omit)
+# summary(fit.AIC.final)
+# 
+# set.seed(1)
+# n <- 4012 #sample size
+# K <- 5 #5-fold CV as an example
+# n.fold <- floor(n/K) #size of each fold, rounded down to the nearest integer (so the last fold might be larger in size)
+# n.shuffle <- sample(1:n, n, replace=FALSE) #shuffle the n indexes
+# index.fold <- list()
+# for(i in 1:K)
+# {
+# if(i<K)
+# {
+# index.fold[[i]] <- n.shuffle[((i-1)*n.fold+1):(i*n.fold)]
+# }else
+# {
+# index.fold[[i]] <- n.shuffle[((K-1)*n.fold+1):n]
+# }
+# }
+# 
+# ## CANT GET THIS TO WORK FOR SOME REASON 
+# 
+# CV.score <- 0
+# 
+# for(i in 1:K)
+# {
+# #fit the full model based on the data excluding the ith fold
+# fit <- lm(ModeTravel_Difference ~  Male + HHCars + Student + ColDeg + EssWkr + Seattle + Black + EmpBenParking + PTinfrequent + PTsuperuser + PTnonuser, data = data_omit[-index.fold[[i]],])
+# #make prediction on each observation in the ith fold
+# pred <- predict(fit,mydata[index.fold[[i]],])
+# #compute average squared error for the ith fold
+# CV.score <- CV.score+(1/n)*sum((ModeTravel_Difference[index.fold[[i]]]-pred)^2)
+# }
+# 
+# CV.score
+```
+
+
+
+
