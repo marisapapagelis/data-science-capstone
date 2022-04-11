@@ -229,13 +229,29 @@ sociodem_vars <- c("ResponseId", "DMA", "WashingtonDC", "Chicago", "Seattle", "D
 data_gc$ModeTravel_Typical_Total
 hist(data_gc$ModeTravel_Typical_Total, breaks = c(0,5,10, 15,20,25, 30,35, 40,45, 50, 60, 70, 80, 90,100,200,250,502))
 summary(data_gc$ModeTravel_Typical_Total)
-# boxplot(ModeTravel_Typical_Total)
+
 
 # sum of trips from all transportation DURING covid
 data_gc$ModeTravel_CV_Total
 data_gc <- data_gc %>% mutate(ModeTravel_CV_Total = ifelse(ModeTravel_CV_Total>500,500,ModeTravel_CV_Total))
 hist(data_gc$ModeTravel_CV_Total,  breaks = c(0,5,10, 15,20,25, 30,35, 40,45, 50, 60, 70, 80, 90,100,200,250,502))
 summary(data_gc$ModeTravel_CV_Total)
+
+# side by side boxplots 
+par(mfrow=c(1,2))
+boxplot(log(data_gc$ModeTravel_Typical_Total), col = "light blue", ylab="Log Weekly Trips",  xlab="Before Covid-19")
+boxplot(log(data_gc$ModeTravel_CV_Total), col = "light blue", ylab="Log Weekly Trips", xlab="During Covid-19")
+
+# scatterplot x axis before data trips and y axis after data trips with paired data 
+plot(data_gc$ModeTravel_Typical_Total ~ data_gc$ModeTravel_CV_Total, main="Weekly Trips Before vs. During Covid-19", ylab="Weekly Trips Before Covid-19",  xlab="Weekly Trips During Covid-19")
+# find outliers 
+# which(data_gc$ModeTravel_Typical_Total > 400)
+# which(data_gc$ModeTravel_CV_Total > 350)
+points(102,470, col = "blue")
+points(500,500, col = "blue")
+points(15,501, col = "blue")
+points(400, 100, col = "blue")
+points(350, 282, col = "blue")
 
 # multi histogram of sum of trips before and during covid
 require(plotrix)
@@ -301,15 +317,15 @@ TravelMode <- rep(c('Train', 'Bus', 'Car Driver', 'Car Passenger', 'Rental', 'RH
 Percentage <- c(0.03257003, 0.0220252, 0.5441531, 0.1557816, 0.01564162, 0.03126458, 0.01866819, 0.009302433, 0.02851748, 0.147987, 0.01096029, 0.006216972, 0.01618292, 0.04256323, 0.5060615, 0.1461104, 0.01261815, 0.05379408, 0.0124685, 0.008175455, 0.03363509, 0.1529818, 0.01661223, 0.004423705)
 data <- data.frame(Coronavirus,TravelMode,Percentage)
 ggplot(data, aes(fill=TravelMode, y=Percentage, x=Coronavirus)) + 
-    geom_bar(position="fill", stat="identity") + theme_classic() + ggtitle("Weekly Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19")
+    geom_bar(position="fill", stat="identity") + theme_classic() + ggtitle("Weekly Proportional Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19")
 
 # stacked bar chart of COUNT of each travel mode
-Count <- c(2829, 3697,43956,12691,1096,4672,1621,808,2477,12854, 952,  867,1180,8346,838,1675,668,438,1802,8196,890,237)
+Count <- c(2829/3993, 3697/3993,43956/3993,12691/3993,1096/3993,4672/3993,1621/3993,808/3993,2477/3993,12854/3993, 952/3993,  867/3993,1180/3993,8346/3993,838/3993,1675/3993,668/3993,438/3993,1802/3993,8196/3993,890/3993,237/3993)
 TravelMode <- rep(c('Train', 'Bus', 'Car Driver', 'Car Passenger', 'Rental', 'RH Priv', 'RH Pool', 'Shared Bike', 'Personal Bike', 'Walk', 'Motor') , 2)
 Coronavirus <- c(rep("Before" , 11) , rep("During" , 11))
 data <- data.frame(Coronavirus,TravelMode, Count)
 ggplot(data, aes(fill=TravelMode, y=Count, x=Coronavirus)) + 
-    geom_bar(position="stack", stat="identity") + theme_classic() + ggtitle("Weekly Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19")
+    geom_bar(position="stack", stat="identity") + theme_classic() + ggtitle("Weekly Travel by Mode Before/After Covid-19") + xlab("Before/During Covid-19") + ylab("Weekly Trips Per Person")
 
 # violin plot 
 # x - mode 
@@ -397,23 +413,10 @@ CV.score
 # diagnostic plots
 plot(fit.BIC)
 
-# remove outliers/influential observations
-data_omit <- data_omit[-c(2476, 1770, 3593, 3838, 2140),]
-ModeTravel_Difference <- ModeTravel_Difference[-c(2476, 1770, 3593, 3838, 2140)]
-attach(data_omit)
-
-fit.BIC.alpha <- lm(ModeTravel_Difference ~ HHCars + EssWkr + PTsuperuser + PTnonuser, data = data_omit)
-plot(fit.BIC.alpha)
-
-# remove more outliers/influential observations
-data_omit <- data_omit[-c(59, 886, 2635, 889, 1785, 3921),]
-ModeTravel_Difference <- ModeTravel_Difference[-c(59, 886, 2635, 889, 1785, 3921)]
-attach(data_omit)
-
-fit.BIC.final <- lm(ModeTravel_Difference ~ HHCars + EssWkr + PTsuperuser + PTnonuser, data = data_omit)
+fit.BIC <- lm(ModeTravel_Difference ~ HHCars + EssWkr + PTsuperuser + PTnonuser, data = data_omit)
 par(mfrow=c(2,2))
-plot(fit.BIC.final)
-summary(fit.BIC.final)
+plot(fit.BIC)
+summary(fit.BIC)
 ```
 
 
