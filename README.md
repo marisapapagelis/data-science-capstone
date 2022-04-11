@@ -1,7 +1,8 @@
 # The Impact of Covid-19 on Travel
 
 ## Project Description
-* 
+I found it both relevant and of interest to look into the potential effects Covid-19 had on travel trends, and how these trends differ based on sociodemographic factors. This project focuses on answering a research question surrounding how Covid-19 impacted weekly travel trends within Chicago, Washington DC, Dallas, and Seattle using stepwise model selection on a binary logistic regression model. 
+
 
 ## About
 * This project serves as a final cumulation capstone of the Data Science Individual Major at Wellesley College to be presented at a conference prior to completion of the major.
